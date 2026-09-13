@@ -1,3 +1,31 @@
+# Capital PyMe - Frontend
+
+Dashboard en React + Vite + Tailwind. Consume la API del backend
+(`../../capital-one-backend`) a través del cliente en
+[src/services/api.js](src/services/api.js):
+
+- `getPredicciones()` → calendario del mes (real vs. proyección).
+- `getKpis()` → tarjetas de liquidez, proyección a 30 días y reserva sugerida.
+- `getRecomendaciones()` → recomendaciones por lapso del mes.
+
+## Setup
+
+```bash
+npm install
+npm run dev
+```
+
+En desarrollo, `vite.config.js` reenvía las rutas `/api/...` al backend en
+`http://127.0.0.1:8000` (ver la sección `server.proxy`), así que **el backend
+debe estar corriendo** (`uvicorn app.main:app --reload --port 8000` desde
+`capital-one-backend`) antes de abrir el frontend. Sin el backend arriba, el
+dashboard muestra una pantalla de error explicando cómo levantarlo.
+
+Para apuntar a un backend en otra URL (por ejemplo en producción), define
+`VITE_API_URL` en un archivo `.env`.
+
+---
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

@@ -1,87 +1,115 @@
-import React, { useState } from 'react';
-import { Bell, TrendingUp, Calendar as CalendarIcon, ArrowUpRight, PiggyBank, BarChart3, ChevronRight, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  Bell, ArrowUpRight, ArrowDownRight, PiggyBank, ChevronRight, Loader2, AlertTriangle,
+} from 'lucide-react';
+import { getPredicciones, getKpis, getRecomendaciones, getGraficaUrl } from './services/api';
+
+const WEEKDAY_LABELS = ['do.', 'lu.', 'ma.', 'mi.', 'ju.', 'vi.', 'sá.'];
+
+const currency = (value) =>
+  (value ?? 0).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+function monthLabel(year, month) {
+  return new Date(year, month - 1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+}
+
+/** Arma la cuadrícula de 7 columnas para el calendario, rellenando los
+ *  huecos de inicio/fin de mes con celdas vacías para alinear los días
+ *  de la semana. */
+function buildGridCells(dias) {
+  if (!dias || dias.length === 0) return [];
+  const leading = Array(dias[0].day_of_week).fill(null);
+  const cells = [...leading, ...dias];
+  const trailing = Array((7 - (cells.length % 7)) % 7).fill(null);
+  return [...cells, ...trailing];
+}
+
+function describeDay(dia, mesLabel) {
+  if (!dia) return 'Selecciona un día del calendario para ver su detalle.';
+  const monto = currency(dia.net_flow);
+  return dia.tipo === 'real'
+    ? `Día ${dia.day} de ${mesLabel}: Registro histórico procesado. Flujo neto real: ${monto}.`
+    : `Día ${dia.day} de ${mesLabel}: Proyección predictiva activa. Flujo neto estimado por el modelo: ${monto}.`;
+}
+
+function getButtonStyle(tipo) {
+  switch (tipo) {
+    case 'danger': return 'bg-[#D01C1F] hover:bg-red-800 text-white';
+    case 'warning': return 'bg-amber-600 hover:bg-amber-700 text-white';
+    default: return 'bg-[#0D233A] hover:bg-blue-950 text-white';
+  }
+}
 
 export default function App() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [calendario, setCalendario] = useState(null);
+  const [kpis, setKpis] = useState(null);
+  const [recomendaciones, setRecomendaciones] = useState([]);
   const [selectedLapso, setSelectedLapso] = useState(null);
-  const [selectedDayInfo, setSelectedDayInfo] = useState({ day: 12, type: 'real', text: 'Cierre histórico al día de hoy: Flujo operativo constante.' });
+  const [selectedDay, setSelectedDay] = useState(null);
 
-  // Fecha actual fija del sistema: 12 de septiembre de 2026
-  const todayDay = 12;
+  useEffect(() => {
+    let cancelled = false;
 
-  // Estructura de la cuadrícula de septiembre de 2026 (Do a Sá)
-  const diasMesSeptiembre2026 = [
-    { day: 30, currentMonth: false }, { day: 31, currentMonth: false },
-    { day: 1, currentMonth: true }, { day: 2, currentMonth: true }, { day: 3, currentMonth: true }, { day: 4, currentMonth: true }, { day: 5, currentMonth: true },
-    { day: 6, currentMonth: true }, { day: 7, currentMonth: true }, { day: 8, currentMonth: true }, { day: 9, currentMonth: true }, { day: 10, currentMonth: true }, { day: 11, currentMonth: true }, { day: 12, currentMonth: true },
-    { day: 13, currentMonth: true }, { day: 14, currentMonth: true }, { day: 15, currentMonth: true }, { day: 16, currentMonth: true }, { day: 17, currentMonth: true }, { day: 18, currentMonth: true }, { day: 19, currentMonth: true },
-    { day: 20, currentMonth: true }, { day: 21, currentMonth: true }, { day: 22, currentMonth: true }, { day: 23, currentMonth: true }, { day: 24, currentMonth: true }, { day: 25, currentMonth: true }, { day: 26, currentMonth: true },
-    { day: 27, currentMonth: true }, { day: 28, currentMonth: true }, { day: 29, currentMonth: true }, { day: 30, currentMonth: true },
-    { day: 1, currentMonth: false }, { day: 2, currentMonth: false }, { day: 3, currentMonth: false }
-  ];
-
-  // Recomendaciones agrupadas por Lapsos de Tiempo
-  const lapsosRecomendaciones = [
-    {
-      id: 'lapso-1',
-      rango: 'Días 1 al 7 (Inicio de Mes)',
-      tipo: 'safe',
-      titulo: 'Optimización inicial y arranque de cobros',
-      mensaje: 'Balance de la primera semana cerrado con éxito. El motor detectó una reducción del 4% en costos fijos de suministros gracias al control de tickets bajos.',
-      accion: 'Ver reporte de costos fijos',
-      badgeColor: 'bg-emerald-100 text-emerald-800'
-    },
-    {
-      id: 'lapso-2',
-      rango: 'Días 8 al 15 (Mitad de Mes & Nómina)',
-      tipo: 'danger',
-      titulo: 'Reserva Oportuna para Presión de Nómina',
-      mensaje: 'Atención: Se proyecta un pico de salida fuerte por compromiso quincenal. Se recomienda transferir de forma preventiva $3,500 al fondo de reserva operativo antes del día 15.',
-      accion: 'Autorizar fondo de reserva',
-      badgeColor: 'bg-red-100 text-[#D01C1F]'
-    },
-    {
-      id: 'lapso-3',
-      rango: 'Días 16 al 22 (Recuperación y Estabilidad)',
-      tipo: 'warning',
-      titulo: 'Auditoría de Suscripciones y Software',
-      mensaje: 'Análisis predictivo de gastos recurrentes muestra cargos hormiga en herramientas digitales sin uso operativo crítico. Cancelar servicios redundantes ahorrará $800 este periodo.',
-      accion: 'Revisar suscripciones fijas',
-      badgeColor: 'bg-amber-100 text-amber-800'
-    },
-    {
-      id: 'lapso-4',
-      rango: 'Días 23 al 30 (Cierre de Mes y Obligaciones)',
-      tipo: 'safe',
-      titulo: 'Fondeo de Reserva Fiscal Oportuna',
-      mensaje: 'Con base en la tendencia de liquidez constante, el motor sugiere separar el excedente acumulado hacia la reserva impositiva para cumplir sin tensiones con el cierre mensual.',
-      accion: 'Configurar reserva fiscal',
-      badgeColor: 'bg-blue-100 text-[#0D233A]'
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [pred, kpisData, recos] = await Promise.all([
+          getPredicciones(),
+          getKpis(),
+          getRecomendaciones(),
+        ]);
+        if (cancelled) return;
+        setCalendario(pred);
+        setKpis(kpisData);
+        setRecomendaciones(recos);
+        setSelectedDay(pred.dias.find((d) => d.is_today) ?? pred.dias.at(-1) ?? null);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  ];
 
-  const handleDayClick = (item) => {
-    if (!item.currentMonth) return;
-    const isPastOrToday = item.day <= todayDay;
-    setSelectedDayInfo({
-      day: item.day,
-      type: isPastOrToday ? 'real' : 'proyeccion',
-      text: isPastOrToday 
-        ? `Día ${item.day} de Septiembre: Registro histórico procesado. Ingresos y costos fijos reales cerrados sin incidencias.` 
-        : `Día ${item.day} de Septiembre: Proyección predictiva activa. Flujo estimado en base al comportamiento de tickets bajos.`
-    });
-  };
+    load();
+    return () => { cancelled = true; };
+  }, []);
 
-  const getButtonStyle = (tipo) => {
-    switch (tipo) {
-      case 'danger': return 'bg-[#D01C1F] hover:bg-red-800 text-white';
-      case 'warning': return 'bg-amber-600 hover:bg-amber-700 text-white';
-      default: return 'bg-[#0D233A] hover:bg-blue-950 text-white';
-    }
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F7F9FB] flex flex-col items-center justify-center gap-3 text-[#0D233A]">
+        <Loader2 className="w-8 h-8 animate-spin" />
+        <p className="text-sm font-bold">Conectando con el motor de liquidez…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#F7F9FB] flex flex-col items-center justify-center gap-3 text-center px-6">
+        <AlertTriangle className="w-10 h-10 text-[#D01C1F]" />
+        <p className="text-sm font-bold text-[#0D233A]">No se pudo cargar la información del backend</p>
+        <p className="text-xs text-slate-500 max-w-md">{error}</p>
+        <p className="text-xs text-slate-400">
+          Verifica que la API esté corriendo (uvicorn app.main:app --port 8000) en capital-one-backend.
+        </p>
+      </div>
+    );
+  }
+
+  const mesLabel = monthLabel(calendario.year, calendario.month);
+  const gridCells = buildGridCells(calendario.dias);
 
   return (
     <div className="min-h-screen bg-[#F7F9FB] text-[#0D233A] font-sans antialiased flex flex-col selection:bg-[#0D233A] selection:text-white">
-      
+
       {/* Top Navbar Capital One Style */}
       <header className="bg-[#0D233A] text-white px-8 py-4 flex items-center justify-between shadow-xl relative overflow-hidden border-b-4 border-[#D01C1F]">
         <div className="absolute top-0 right-0 w-[500px] h-full opacity-15 bg-gradient-to-l from-[#D01C1F] via-[#D01C1F]/40 to-transparent pointer-events-none transform skew-x-12"></div>
@@ -115,45 +143,48 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Columna Principal: Calendario Estilo Tradicional */}
         <div className="lg:col-span-2 space-y-6">
-          
+
           {/* Tarjetas KPI Superiores */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-xl shadow-sm border-t-4 border-t-[#0D233A] border-x border-b border-slate-200/80">
               <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Liquidez Actual (Real)</p>
-              <h3 className="text-2xl font-black text-[#0D233A] mt-1">$45,200.00</h3>
+              <h3 className="text-2xl font-black text-[#0D233A] mt-1">{currency(kpis.liquidez_actual)}</h3>
               <div className="flex items-center text-emerald-600 text-xs font-bold mt-2 bg-emerald-50 w-fit px-2 py-0.5 rounded">
-                <ArrowUpRight className="w-3.5 h-3.5 mr-1" /> Cierre al Día 12
+                <ArrowUpRight className="w-3.5 h-3.5 mr-1" /> Cierre al {kpis.fecha_corte}
               </div>
             </div>
 
             <div className="bg-white p-5 rounded-xl shadow-sm border-t-4 border-t-[#D01C1F] border-x border-b border-slate-200/80">
               <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Proyección 30 Días</p>
-              <h3 className="text-2xl font-black text-[#D01C1F] mt-1">$12,450.00</h3>
-              <span className="inline-block bg-red-50 text-[#D01C1F] text-[10px] font-bold px-2 py-0.5 rounded mt-2 border border-red-200">
-                ⚠️ Margen ajustado proyectado
+              <h3 className="text-2xl font-black text-[#D01C1F] mt-1">{currency(kpis.proyeccion_30_dias)}</h3>
+              <span className="inline-flex items-center gap-1 bg-red-50 text-[#D01C1F] text-[10px] font-bold px-2 py-0.5 rounded mt-2 border border-red-200">
+                {kpis.variacion_pct_30_dias >= 0
+                  ? <ArrowUpRight className="w-3 h-3" />
+                  : <ArrowDownRight className="w-3 h-3" />}
+                {kpis.variacion_pct_30_dias >= 0 ? '+' : ''}{kpis.variacion_pct_30_dias}% vs. hoy (modelo)
               </span>
             </div>
 
             <div className="bg-white p-5 rounded-xl shadow-sm border-t-4 border-t-[#0D233A] border-x border-b border-slate-200/80">
               <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Reserva Sugerida</p>
-              <h3 className="text-2xl font-black text-[#0D233A] mt-1">$5,000.00</h3>
+              <h3 className="text-2xl font-black text-[#0D233A] mt-1">{currency(kpis.reserva_sugerida)}</h3>
               <span className="inline-block bg-blue-50 text-[#0D233A] text-[10px] font-bold px-2 py-0.5 rounded mt-2 border border-blue-200">
-                💡 Meta de ahorro activo
+                💡 Colchón sugerido por el modelo (RMSE {kpis.rmse_modelo})
               </span>
             </div>
           </div>
 
-          {/* Calendario Estilo Cuadrícula Tradicional (Septiembre 2026) */}
+          {/* Calendario Estilo Cuadrícula Tradicional */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200/80 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1.5 h-full bg-[#0D233A]"></div>
-            
+
             {/* Cabecera del Calendario */}
             <div className="flex justify-between items-center mb-6 pl-2">
               <div>
-                <h4 className="font-black text-[#0D233A] text-lg capitalize">septiembre de 2026</h4>
+                <h4 className="font-black text-[#0D233A] text-lg capitalize">{mesLabel}</h4>
                 <p className="text-xs text-slate-400">Haz clic en cualquier día para consultar su estado financiero</p>
               </div>
               <div className="flex items-center space-x-4 text-xs">
@@ -164,42 +195,33 @@ export default function App() {
 
             {/* Días de la semana */}
             <div className="grid grid-cols-7 gap-2 text-center font-bold text-xs text-slate-400 mb-2 pb-2 border-b border-slate-100">
-              <div>do.</div>
-              <div>lu.</div>
-              <div>ma.</div>
-              <div>mi.</div>
-              <div>ju.</div>
-              <div>vi.</div>
-              <div>sá.</div>
+              {WEEKDAY_LABELS.map((label) => <div key={label}>{label}</div>)}
             </div>
 
             {/* Cuadrícula de los días */}
             <div className="grid grid-cols-7 gap-2">
-              {diasMesSeptiembre2026.map((item, index) => {
-                const isToday = item.currentMonth && item.day === todayDay;
-                const isPast = item.currentMonth && item.day < todayDay;
-                const isFuture = item.currentMonth && item.day > todayDay;
-                const isSelected = selectedDayInfo.day === item.day && item.currentMonth;
+              {gridCells.map((dia, index) => {
+                if (!dia) {
+                  return <div key={`blank-${index}`} className="h-12" />;
+                }
+                const isToday = dia.is_today;
+                const isPast = dia.tipo === 'real' && !isToday;
+                const isSelected = selectedDay?.date === dia.date;
 
                 return (
                   <button
-                    key={index}
-                    disabled={!item.currentMonth}
-                    onClick={() => handleDayClick(item)}
+                    key={dia.date}
+                    onClick={() => setSelectedDay(dia)}
                     className={`h-12 rounded-lg flex flex-col items-center justify-center relative transition-all text-xs font-bold ${
-                      !item.currentMonth 
-                        ? 'text-slate-300 bg-transparent cursor-default' 
-                        : isToday
-                          ? 'bg-[#0D233A] text-white ring-2 ring-[#D01C1F] shadow-md'
-                          : isPast
-                            ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
-                            : 'bg-blue-50/60 text-[#0D233A] hover:bg-blue-100 border border-blue-200'
+                      isToday
+                        ? 'bg-[#0D233A] text-white ring-2 ring-[#D01C1F] shadow-md'
+                        : isPast
+                          ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                          : 'bg-blue-50/60 text-[#0D233A] hover:bg-blue-100 border border-blue-200'
                     } ${isSelected && !isToday ? 'ring-2 ring-[#0D233A]' : ''}`}
                   >
-                    <span>{item.day}</span>
-                    {item.currentMonth && (
-                      <span className={`w-1 h-1 rounded-full mt-1 ${isPast || isToday ? 'bg-slate-400' : 'bg-[#D01C1F]'}`}></span>
-                    )}
+                    <span>{dia.day}</span>
+                    <span className={`w-1 h-1 rounded-full mt-1 ${dia.tipo === 'real' ? 'bg-slate-400' : 'bg-[#D01C1F]'}`}></span>
                   </button>
                 );
               })}
@@ -209,14 +231,23 @@ export default function App() {
             <div className="mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#0D233A]">
-                  Estado del Día {selectedDayInfo.day} de Septiembre ({selectedDayInfo.type === 'real' ? 'Dato Histórico Real' : 'Proyección Predictiva'})
+                  Estado del Día {selectedDay?.day ?? '—'} ({selectedDay?.tipo === 'real' ? 'Dato Histórico Real' : 'Proyección Predictiva'})
                 </span>
                 <p className="text-xs text-slate-700 mt-1 font-medium">
-                  {selectedDayInfo.text}
+                  {describeDay(selectedDay, mesLabel)}
                 </p>
               </div>
             </div>
 
+          </div>
+
+          {/* Gráfica de tendencia de liquidez (histórico + proyección del modelo) */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200/80">
+            <img
+              src={getGraficaUrl()}
+              alt="Tendencia de liquidez: histórico real y proyección del modelo"
+              className="w-full h-auto rounded-lg"
+            />
           </div>
 
         </div>
@@ -239,8 +270,8 @@ export default function App() {
 
             {/* Listado de Lapsos */}
             <div className="space-y-3 flex-1">
-              {lapsosRecomendaciones.map((lapso) => {
-                const isSelected = selectedLapso && selectedLapso.id === lapso.id;
+              {recomendaciones.map((lapso) => {
+                const isSelected = selectedLapso?.id === lapso.id;
                 return (
                   <div
                     key={lapso.id}
@@ -277,7 +308,7 @@ export default function App() {
             ) : (
               <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 text-center">
                 <p className="text-xs text-slate-400 font-medium">
-                  Haz clic en cualquiera de los 4 lapsos superiores para ver la recomendación táctica del motor de liquidez.
+                  Haz clic en cualquiera de los lapsos superiores para ver la recomendación táctica del motor de liquidez.
                 </p>
               </div>
             )}
